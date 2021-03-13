@@ -49,6 +49,16 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+	// ADDED PROC INFO
+	struct proc next*;	// points to the next process in the round robin scheduler
+	int timeslice;  		// number of base ticks this process can run for
+	int totalComp;  		// total number of compensation ticks that it has used
+	int givenComp;  		// total number of compensation ticks allowed for next cycle
+	int totalTicks; 		// total number of ticks this process has been scheduled 
+	int sleepTicks; 		// number of ticks during which this process was blocked
+	int switches;				// total number of times this process has been scheduled
+
 };
 
 // Process memory is laid out contiguously, low addresses first:

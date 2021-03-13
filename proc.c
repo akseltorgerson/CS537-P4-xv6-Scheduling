@@ -7,13 +7,10 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "pstat.h"
-#include "linkedlist.h"
 
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
-	// adding in the pstat struct into ptable
-	struct pstat pstat;
 } ptable;
 
 static struct proc *initproc;
@@ -23,6 +20,44 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+
+/***************************** LINKED LIST MANAGER **********/
+struct proc *head = 0;
+struct proc *curr = 0;
+
+int push(stuct proc *proc) {
+	if (head == 0) {
+		head = proc;
+		return 0;
+	} else {
+		curr = head;		
+		while (curr->next != 0) {curr = curr->next;}
+		curr->next = proc;
+		return 0;
+	}
+	return -1;
+}
+
+struct proc* pop() {
+	if (head == 0) {
+		return 0;
+	} else {
+		struct proc *retProc = head;
+		head = head->next;
+		return retProc;
+	}
+	return 0;
+}
+
+struct proc* peek() {
+	if (head == 0) {
+		return 0;
+	} else {
+		struct proc *retProc = head;
+		return retProc;
+	}
+}
+/*********************************************************/
 
 void
 pinit(void)
@@ -116,6 +151,9 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+	// should be pushed to the end of the queue
+	push(p);
+
   return p;
 }
 
@@ -153,6 +191,18 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
+	
+	// this is the first process, there isn't any others
+	
+	// there isn't any other processes running so we null the next pointer
+	p->next = 0;
+	// default timeslice of 1 tick
+	p->timeslice = 1;
+	p->totalComp = 0;
+	p->givenComp = 0;
+	p->totalTicks = 0;
+	p->sleepTicks = 0;
+	p->switches = 0;
 
   release(&ptable.lock);
 }
@@ -220,6 +270,14 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+	np->next = 0;
+	// default timeslice of 1 tick
+	np->timeslice = 1;
+	np->totalComp = 0;
+	np->givenComp = 0;
+	np->totalTicks = 0;
+	np->sleepTicks = 0;
+	np->switches = 0;
 
   release(&ptable.lock);
 
@@ -382,6 +440,7 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
+	// dont call if time isnt up??
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -547,29 +606,24 @@ procdump(void)
 * Returns -1 on failure and 0 on success
 */
 int setslice(int pid, int slice) {
-	if(slice <= 0 || pid <= 0){
+	if(pid <= 0 || slice <= 0){
     return -1;
   } else {
 		// snag the ptable lock | can probably move this later to make more efficient
-		// acquire(&ptable.lock);
-		
+		acquire(&ptable.lock);		
 		// loop through the processsor table and find the matching PID
 		for(int i = 0; i < NPROC; i++) {
 			if(ptable.pstat.pid[i] == pid) {
 				// if the PID matches the one we're looking for
 				ptable.pstat.timeslice[i] = slice;
 				
-				// release(&ptable.lock);
+				release(&ptable.lock);
 				return 0;
 			}
 		}
-
-
+		release(&ptable.lock);
 	}
-	// return 0 on successful completion
-
 	// pid was not found if we reach here
-	release(&ptable.lock);
   return 1;
 }
 
@@ -578,6 +632,26 @@ int setslice(int pid, int slice) {
 * Returns -1 if the pid is not valid
 */
 int getslice(int pid) {
+	if (pid <= 0) {
+		return -1;
+	} else {
+		// snag dat lock again
+		acquire(&ptable.lock);
+
+		for (int i = 0; i < NPROC; i++) {
+			if (ptable.pstat.pid[i] == pid) {
+				return ptable.pstat.timeslice[i];
+			}
+
+		}
+
+
+
+
+	}
+
+
+
   return -1;
 }
 
