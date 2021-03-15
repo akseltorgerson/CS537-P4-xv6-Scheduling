@@ -51,7 +51,7 @@ struct proc {
   char name[16];               // Process name (debugging)
 
 	// ADDED PROC INFO
-	struct proc next*;	// points to the next process in the round robin scheduler
+	struct proc *next;	// points to the next process in the round robin scheduler
 	int timeslice;  		// number of base ticks this process can run for
 	int totalComp;  		// total number of compensation ticks that it has used
 	int givenComp;  		// total number of compensation ticks allowed for next cycle

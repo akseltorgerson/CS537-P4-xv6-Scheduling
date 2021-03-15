@@ -22,10 +22,15 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 /***************************** LINKED LIST MANAGER **********/
+//TODO:
+//Maybe Make is circular so that the last in the list points to the beginning
+//Do singly linked list with a head and a tail, still needs to be circular
+//Head should be the process that is currently running, could just call myproc()
+// to get the current running process
 struct proc *head = 0;
 struct proc *curr = 0;
 
-int push(stuct proc *proc) {
+int push(struct proc *proc) {
 	if (head == 0) {
 		head = proc;
 		return 0;
@@ -151,7 +156,10 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
-	// should be pushed to the end of the queue
+	// Push new process to the end of the scheduling queue
+	// NOTE: This process may exist in the proc[NPROC] array
+	// at an arbitrary location, however, push and pop manage
+	// the order of the queue, which scheduler() will read from
 	push(p);
 
   return p;
@@ -272,6 +280,7 @@ fork(void)
   np->state = RUNNABLE;
 	np->next = 0;
 	// default timeslice of 1 tick
+  //TODO: Is it defualt 1 tick or is it supposed to inherit the timeslice of the parent?
 	np->timeslice = 1;
 	np->totalComp = 0;
 	np->givenComp = 0;
@@ -522,10 +531,17 @@ static void
 wakeup1(void *chan)
 {
   struct proc *p;
-
+  //TODO: Change this so that is doesn't wakeup all processes at once
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    // Add in && p->deadline >= *chan cuz *chan is just the number of ticks
     if(p->state == SLEEPING && p->chan == chan)
       p->state = RUNNABLE;
+      //add to tail
+    /* else if(p->state == SLEEPING){
+      compensate 
+    }
+
+    */
 }
 
 // Wake up all processes sleeping on chan.
@@ -609,22 +625,22 @@ int setslice(int pid, int slice) {
 	if(pid <= 0 || slice <= 0){
     return -1;
   } else {
+    struct proc *p;
 		// snag the ptable lock | can probably move this later to make more efficient
-		acquire(&ptable.lock);		
-		// loop through the processsor table and find the matching PID
-		for(int i = 0; i < NPROC; i++) {
-			if(ptable.pstat.pid[i] == pid) {
-				// if the PID matches the one we're looking for
-				ptable.pstat.timeslice[i] = slice;
-				
-				release(&ptable.lock);
-				return 0;
-			}
-		}
+		acquire(&ptable.lock);
+    //Maybe just go through pstast? I just copied this from kill which takes a pid
+    // p is a pointer and p++ increments the pointer
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->pid == pid){
+        p->timeslice = slice;
+        release(&ptable.lock);
+        return 0;
+      }
+    }
 		release(&ptable.lock);
 	}
 	// pid was not found if we reach here
-  return 1;
+  return -1;
 }
 
 /*
@@ -635,23 +651,18 @@ int getslice(int pid) {
 	if (pid <= 0) {
 		return -1;
 	} else {
-		// snag dat lock again
-		acquire(&ptable.lock);
-
-		for (int i = 0; i < NPROC; i++) {
-			if (ptable.pstat.pid[i] == pid) {
-				return ptable.pstat.timeslice[i];
-			}
-
-		}
-
-
-
-
+    struct proc *p;
+    acquire(&ptable.lock);
+    //p = same as doing = &ptable.proc[0]
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->pid == pid){
+        release(&ptable.lock);
+        return p->timeslice;
+      }
+    }
+    release(&ptable.lock);
 	}
-
-
-
+  // pid was not found if we reach here
   return -1;
 }
 
@@ -661,10 +672,55 @@ int getslice(int pid) {
 * Returns -1 if the slice given is not positive
 */
 int fork2(int slice) {
-  //int i, pid;
-  //struct proc *np;
+  if(slice <= 0){
+    return -1;
+  }
+  int i, pid;
+  struct proc *np;
+  struct proc *curproc = myproc();
 
-  return -1;
+  // Allocate process.
+  if((np = allocproc()) == 0){
+    return -1;
+  }
+
+  // Copy process state from proc.
+  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
+    kfree(np->kstack);
+    np->kstack = 0;
+    np->state = UNUSED;
+    return -1;
+  }
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
+
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  for(i = 0; i < NOFILE; i++)
+    if(curproc->ofile[i])
+      np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
+
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+
+  pid = np->pid;
+
+  acquire(&ptable.lock);
+  np->state = RUNNABLE;
+  np->next = 0;
+  // Set the timeslice equal to the number that was passed in
+  np->timeslice = slice;
+  np->totalComp = 0;
+  np->givenComp = 0;
+  np->totalTicks = 0;
+  np->sleepTicks = 0;
+  np->switches = 0;
+
+  release(&ptable.lock);
+
+  return pid;
 } 
 
 /*
@@ -672,5 +728,19 @@ int fork2(int slice) {
 * Return 0 on success, -1 on failure
 */
 int getpinfo(struct pstat *pst) {
-  return -1;
+  int i;
+  // TODO: Populating pst based on the information in the ptable?
+  // Also not sure when to check if this fails or not
+  for(i = 0; i < NPROC; i++){
+    // Not sure how to populate inuse
+    struct proc *p = &ptable.proc[i];
+    pst->inuse[i] = 1;
+    pst->pid[i] = p->pid;
+    pst->timeslice[i] = p->timeslice;
+    pst->compticks[i] = p->totalComp;
+    pst->schedticks[i] = p->totalTicks;
+    pst->sleepticks[i] = p->sleepTicks;
+    pst->switches[i] = p->switches;
+  }
+  return 0;
 }

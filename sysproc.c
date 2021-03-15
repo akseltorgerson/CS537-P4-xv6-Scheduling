@@ -96,26 +96,50 @@ sys_uptime(void)
 
 int sys_setslice(void)
 {
-  // TODO: Fix this
-  return setslice(1, 0);
+  int pid, slice;
+  //TODO: Not sure if this is the correct method for getting
+  //two arugments
+  if(argint(0, &pid) < 0){
+    return -1;
+  }
+  if(argint(1, &slice) < 0){
+    return -1;
+  }
+  return setslice(pid, slice);
 }
 
 int sys_getslice(void)
 {
-  //TODO: Fix this
-  return getslice(1);
+  int pid;
+  // Copied this from kill 
+  if(argint(0, &pid) < 0){
+    return -1;
+  }
+  return getslice(pid);
 }
 
 int sys_fork2(void)
 {
-  //TODO: Fix this
-  return fork2(1);
+  int slice;
+  // Copied this from kill
+  if(argint(0, &slice) < 0){
+    return -1;
+  }
+  return fork2(slice);
 }
 
 int sys_getpinfo(void)
 {
-  //TODO: Fix this
-  return getpinfo((void*)1);
+/*
+  struct pstat *pstat1;
+  // Got this from the piazza post FAQ which linked to a stackoverflow
+  if(argptr(0, (void*)&pstat1, sizeof(*pstat1)) < 0){
+    return -1;
+  }
+
+  return getpinfo(pstat1);
+  */
+  return 1;
 }
 
 
