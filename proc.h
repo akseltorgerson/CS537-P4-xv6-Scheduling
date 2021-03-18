@@ -53,11 +53,13 @@ struct proc {
 	// ADDED PROC INFO
 	struct proc *next;	// points to the next process in the round robin scheduler
 	int timeslice;  		// number of base ticks this process can run for
+	int t0;							// initial time scheduled
 	int totalComp;  		// total number of compensation ticks that it has used
-	int givenComp;  		// total number of compensation ticks allowed for next cycle
+	int givenComp;  		// number of compensation ticks allowed for next cycle
 	int totalTicks; 		// total number of ticks this process has been scheduled 
-	int sleepTicks; 		// number of ticks during which this process was blocked
+	int sleepTicks; 		// total number of ticks during which this process was blocked
 	int switches;				// total number of times this process has been scheduled
+  int sleepDeadline;  // the tick number where a process should be woken up (tickSleptOn + ticksToSleep)
 
 };
 

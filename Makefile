@@ -173,9 +173,11 @@ UPROGS=\
 	_init\
 	_kill\
 	_ln\
+	_loop\
 	_ls\
 	_mkdir\
 	_rm\
+	_schedtest\
 	_sh\
 	_stressfs\
 	_usertests\

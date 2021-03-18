@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "pstat.h"
 
 int
 sys_fork(void)
@@ -61,18 +62,20 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-
+  struct proc *curr = myproc();
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
   ticks0 = ticks;
-  while(ticks - ticks0 < n){
-    if(myproc()->killed){
-      release(&tickslock);
-      return -1;
-    }
-    sleep(&ticks, &tickslock);
+  // Deadline where a process should be awoken
+  curr->sleepDeadline = ticks0 + n;
+  //while(ticks - ticks0 < n){
+  if(curr->killed){
+    release(&tickslock);
+    return -1;
   }
+  sleep(&ticks, &tickslock);
+  //}
   release(&tickslock);
   return 0;
 }
@@ -130,7 +133,7 @@ int sys_fork2(void)
 
 int sys_getpinfo(void)
 {
-/*
+
   struct pstat *pstat1;
   // Got this from the piazza post FAQ which linked to a stackoverflow
   if(argptr(0, (void*)&pstat1, sizeof(*pstat1)) < 0){
@@ -138,8 +141,6 @@ int sys_getpinfo(void)
   }
 
   return getpinfo(pstat1);
-  */
-  return 1;
 }
 
 

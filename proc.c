@@ -22,9 +22,6 @@ extern void trapret(void);
 static void wakeup1(void *chan);
 
 /***************************** LINKED LIST MANAGER **********/
-//TODO:
-//Maybe Make is circular so that the last in the list points to the beginning
-//Do singly linked list with a head and a tail, still needs to be circular
 //Head should be the process that is currently running, could just call myproc()
 // to get the current running process
 struct proc *head = 0;
@@ -36,7 +33,9 @@ int push(struct proc *proc) {
 		return 0;
 	} else {
 		curr = head;		
-		while (curr->next != 0) {curr = curr->next;}
+		while (curr->next != 0) {
+      curr = curr->next;
+    }
 		curr->next = proc;
 		return 0;
 	}
@@ -132,7 +131,6 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -279,9 +277,8 @@ fork(void)
 
   np->state = RUNNABLE;
 	np->next = 0;
-	// default timeslice of 1 tick
-  //TODO: Is it defualt 1 tick or is it supposed to inherit the timeslice of the parent?
-	np->timeslice = 1;
+	// Inherit the timeslice of the parent
+	np->timeslice = curproc->timeslice;
 	np->totalComp = 0;
 	np->givenComp = 0;
 	np->totalTicks = 0;
@@ -404,17 +401,28 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+		// instead of looping through the proc table to find the next "RUNNABLE" process
+		// lets instead look at the head of our queue, the queue will only be RUNNABLE processes
+		
+		//if (ticks - t0 >=  
+
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-
+		
+		//if (head->totalTicks)
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
+			p->t0 = ticks;
 
+			//cprintf("running process: %d\n", p->pid);
+      // TODO: increment switches before or after this?
+      p->switches++;
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
@@ -491,7 +499,6 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
   if(p == 0)
     panic("sleep");
 
@@ -511,7 +518,11 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
-
+  // Reset givenComp for the next cycle to avoid accumulation
+  p->givenComp = 0;
+  // TODO: Maybe pop a process off of the queue when put to sleep?
+  // Probably need to store it somewhere
+  pop();
   sched();
 
   // Tidy up.
@@ -532,16 +543,22 @@ wakeup1(void *chan)
 {
   struct proc *p;
   //TODO: Change this so that is doesn't wakeup all processes at once
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    // Add in && p->deadline >= *chan cuz *chan is just the number of ticks
-    if(p->state == SLEEPING && p->chan == chan)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    // last check is to make sure the current time is past or equal to the
+    // time that the process should be woken up
+    if(p->state == SLEEPING && p->chan == chan /*&& p->sleepDeadline <= ticks*/){
       p->state = RUNNABLE;
-      //add to tail
-    /* else if(p->state == SLEEPING){
-      compensate 
+      // Now that its awake, push it to the end of the queue
+      //TODO: This is causing an issue that will make it so xv6 doesn't run
+      //push(p);
     }
-
-    */
+    // Increment the compensation ticks while a process is sleeping
+    else if(p->state == SLEEPING){
+      p->givenComp++;
+      p->totalComp++;
+      p->sleepTicks++;
+    }
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -656,8 +673,9 @@ int getslice(int pid) {
     //p = same as doing = &ptable.proc[0]
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->pid == pid){
+				int timeslice = p->timeslice;
         release(&ptable.lock);
-        return p->timeslice;
+        return timeslice;
       }
     }
     release(&ptable.lock);
@@ -729,12 +747,17 @@ int fork2(int slice) {
 */
 int getpinfo(struct pstat *pst) {
   int i;
-  // TODO: Populating pst based on the information in the ptable?
-  // Also not sure when to check if this fails or not
+  if(pst == 0){
+    return -1;
+  }
+  // Populate the pstat
   for(i = 0; i < NPROC; i++){
-    // Not sure how to populate inuse
     struct proc *p = &ptable.proc[i];
-    pst->inuse[i] = 1;
+    if(p->state == UNUSED) {
+      pst->inuse[i] = 0;
+    } else{
+      pst->inuse[i] = 1;
+    }
     pst->pid[i] = p->pid;
     pst->timeslice[i] = p->timeslice;
     pst->compticks[i] = p->totalComp;
