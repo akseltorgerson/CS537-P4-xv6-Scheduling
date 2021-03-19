@@ -104,11 +104,11 @@ trap(struct trapframe *tf)
   // If interrupts were on while locks held, would need to check nlock.
 	acquire(&tickslock);	
   if(myproc() && myproc()->state == RUNNING &&
-     tf->trapno == T_IRQ0+IRQ_TIMER && myproc()->t0 + myproc()->timeslice + myproc()->givenComp <= ticks) // check ticks
+     tf->trapno == T_IRQ0+IRQ_TIMER && myproc()->t0 + myproc()->timeslice + myproc()->givenComp <= ticks){
 		// release the lock
     release(&tickslock);
     yield();
-	else{
+  } else { 
     release(&tickslock);
   }
 

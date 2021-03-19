@@ -30,6 +30,7 @@ struct proc *curr = 0;
 int push(struct proc *proc) {
 	if (head == 0) {
 		head = proc;
+		proc->next = 0;
 		return 0;
 	} else {
 		curr = head;		
@@ -37,6 +38,7 @@ int push(struct proc *proc) {
       curr = curr->next;
     }
 		curr->next = proc;
+		proc->next = 0;
 		return 0;
 	}
 	return -1;
@@ -53,13 +55,36 @@ struct proc* pop() {
 	return 0;
 }
 
-struct proc* peek() {
-	if (head == 0) {
-		return 0;
+int pushToBack(struct proc *proc) {
+	curr = head;
+	struct proc *prev = 0;
+	if (proc == 0) {
+		return -1;
+	} else if (head == 0) {
+		head = proc;
+		proc->next = 0;
+		return 1;
 	} else {
-		struct proc *retProc = head;
-		return retProc;
+    // Find the proc to push to back
+		while (curr->pid != proc->pid) {
+			if (curr->next != 0) {
+				prev = curr;
+				curr = curr->next;
+        // If we get to the end of the linked list and it was not found
+			} else {
+				return -1;
+			}
+		}
+		// at this point we've either returned -1 or curr is the node we want to push to back
+		if (curr == head) {
+			push(pop());
+		} else {
+			prev->next = curr->next;
+			curr->next = 0;
+			push(curr);
+		}
 	}
+	return 1;
 }
 /*********************************************************/
 
@@ -131,6 +156,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+	//push(p);
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -158,7 +184,6 @@ found:
 	// NOTE: This process may exist in the proc[NPROC] array
 	// at an arbitrary location, however, push and pop manage
 	// the order of the queue, which scheduler() will read from
-	push(p);
 
   return p;
 }
@@ -201,7 +226,7 @@ userinit(void)
 	// this is the first process, there isn't any others
 	
 	// there isn't any other processes running so we null the next pointer
-	p->next = 0;
+	//p->next = 0;
 	// default timeslice of 1 tick
 	p->timeslice = 1;
 	p->totalComp = 0;
@@ -209,6 +234,9 @@ userinit(void)
 	p->totalTicks = 0;
 	p->sleepTicks = 0;
 	p->switches = 0;
+	p->sleepDeadline = 0;
+  p->t0 = 0;
+	push(p);
 
   release(&ptable.lock);
 }
@@ -276,7 +304,7 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
-	np->next = 0;
+	//np->next = 0;
 	// Inherit the timeslice of the parent
 	np->timeslice = curproc->timeslice;
 	np->totalComp = 0;
@@ -284,6 +312,9 @@ fork(void)
 	np->totalTicks = 0;
 	np->sleepTicks = 0;
 	np->switches = 0;
+	np->sleepDeadline = 0;
+  np->t0 = 0;
+	push(np);
 
   release(&ptable.lock);
 
@@ -329,9 +360,23 @@ exit(void)
         wakeup1(initproc);
     }
   }
-
+  acquire(&tickslock);
+  curproc->totalTicks -= (curproc->t0 + curproc->timeslice + curproc->givenComp - ticks);
+  if(ticks <= curproc->t0 + curproc->timeslice){
+    curproc->totalComp -= curproc->givenComp;
+  }
+  else{
+    curproc->totalComp -= (curproc->t0 + curproc->timeslice + curproc->givenComp - ticks);
+  }
+	
+  release(&tickslock);
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+	/*******************************************************************/
+	//release(&ptable.lock);
+	/*******************************************************************/
+  curproc->givenComp = 0;
+  pop();
   sched();
   panic("zombie exit");
 }
@@ -399,39 +444,49 @@ scheduler(void)
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+		// !I dont think we need to acquire the ptable lock anymore
     acquire(&ptable.lock);
 
-		// instead of looping through the proc table to find the next "RUNNABLE" process
-		// lets instead look at the head of our queue, the queue will only be RUNNABLE processes
+		// whenever scheduler gets invoked, the process now at the head should be scheduled
 		
-		//if (ticks - t0 >=  
+		
+    //for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    //  if(p->state != RUNNABLE)
+    //    continue;
 
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-		
-		//if (head->totalTicks)
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+		if (head != 0) {
+			p = head;
+			// Switch to chosen process.  It is the process's job
+			// to release ptable.lock and then reacquire it
+			// before jumping back to us.
+			c->proc = p;
+			switchuvm(p);
+			p->state = RUNNING;
+
+			//acquire ticks lock
+			acquire(&tickslock);
 			p->t0 = ticks;
+			release(&tickslock);
+			//release ticks lock
+			p->switches++;
+      p->totalTicks += p->timeslice + p->givenComp;
+      p->totalComp += p->givenComp;
+			swtch(&(c->scheduler), p->context);
+      /*
+      p->totalTicks++;
+      acquire(&tickslock);
+      if(p->t0 + p->timeslice < ticks && p->givenComp > 0){
+        p->totalComp++;
+      }
+      release(&tickslock);*/
+			switchkvm();
+		
+			// Process is done running for now.
+			// It should have changed its p->state before coming back.
+			c->proc = 0;
 
-			//cprintf("running process: %d\n", p->pid);
-      // TODO: increment switches before or after this?
-      p->switches++;
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
-
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&ptable.lock);
-
+		}
+		release(&ptable.lock);
   }
 }
 
@@ -457,7 +512,6 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = mycpu()->intena;
-	// dont call if time isnt up??
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
 }
@@ -468,6 +522,9 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  myproc()->givenComp = 0;
+  // Push pop because timeslice +compticks is up, add to tail of queue 
+  push(pop());
   sched();
   release(&ptable.lock);
 }
@@ -519,9 +576,16 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
   // Reset givenComp for the next cycle to avoid accumulation
+  p->totalTicks -= (p->t0 + p->timeslice + p->givenComp - ticks);
+  if(ticks <= p->t0 + p->timeslice){
+    p->totalComp -= p->givenComp;
+  }
+  else{
+    p->totalComp -= (p->t0 + p->timeslice + p->givenComp - ticks);
+  }
+	
   p->givenComp = 0;
-  // TODO: Maybe pop a process off of the queue when put to sleep?
-  // Probably need to store it somewhere
+  // 
   pop();
   sched();
 
@@ -542,20 +606,20 @@ static void
 wakeup1(void *chan)
 {
   struct proc *p;
-  //TODO: Change this so that is doesn't wakeup all processes at once
+  //Changed this so that is doesn't wakeup all processes at once
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     // last check is to make sure the current time is past or equal to the
     // time that the process should be woken up
-    if(p->state == SLEEPING && p->chan == chan /*&& p->sleepDeadline <= ticks*/){
+    if(p->state == SLEEPING && p->chan == chan && p->sleepDeadline <= ticks){
       p->state = RUNNABLE;
       // Now that its awake, push it to the end of the queue
-      //TODO: This is causing an issue that will make it so xv6 doesn't run
-      //push(p);
+      // was push to back
+      push(p);
     }
     // Increment the compensation ticks while a process is sleeping
-    else if(p->state == SLEEPING){
+    else if(p->state == SLEEPING /*&& p->chan == chan*/){
       p->givenComp++;
-      p->totalComp++;
+      //p->totalComp++;
       p->sleepTicks++;
     }
   }
@@ -583,8 +647,13 @@ kill(int pid)
     if(p->pid == pid){
       p->killed = 1;
       // Wake process from sleep if necessary.
-      if(p->state == SLEEPING)
+      // push to end because waking it up
+      //TODO: Maybe adhere to sleepdeadline, probably not tho
+      if(p->state == SLEEPING){
         p->state = RUNNABLE;
+        // TODO: Was PushtoBack
+        push(p);
+      }
       release(&ptable.lock);
       return 0;
     }
@@ -727,7 +796,7 @@ int fork2(int slice) {
 
   acquire(&ptable.lock);
   np->state = RUNNABLE;
-  np->next = 0;
+  //np->next = 0;
   // Set the timeslice equal to the number that was passed in
   np->timeslice = slice;
   np->totalComp = 0;
@@ -735,6 +804,9 @@ int fork2(int slice) {
   np->totalTicks = 0;
   np->sleepTicks = 0;
   np->switches = 0;
+	np->sleepDeadline = 0;
+  np->t0 = 0;
+	push(np);
 
   release(&ptable.lock);
 
