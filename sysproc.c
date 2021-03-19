@@ -68,6 +68,7 @@ sys_sleep(void)
   acquire(&tickslock);
   ticks0 = ticks;
   // Deadline where a process should be awoken
+  //curr->sleepDeadline = ticks0 + n;
   curr->sleepDeadline = ticks0 + n;
   //while(ticks - ticks0 < n){
   if(curr->killed){
@@ -136,6 +137,7 @@ int sys_getpinfo(void)
 
   struct pstat *pstat1;
   // Got this from the piazza post FAQ which linked to a stackoverflow
+  // maybe have sizeof(struct pstat)
   if(argptr(0, (void*)&pstat1, sizeof(*pstat1)) < 0){
     return -1;
   }

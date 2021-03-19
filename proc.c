@@ -235,7 +235,7 @@ userinit(void)
 	p->sleepTicks = 0;
 	p->switches = 0;
 	p->sleepDeadline = 0;
-  p->t0 = 0;
+  p->runningTicks = 0;
 	push(p);
 
   release(&ptable.lock);
@@ -313,7 +313,7 @@ fork(void)
 	np->sleepTicks = 0;
 	np->switches = 0;
 	np->sleepDeadline = 0;
-  np->t0 = 0;
+  np->runningTicks = 0;
 	push(np);
 
   release(&ptable.lock);
@@ -360,24 +360,16 @@ exit(void)
         wakeup1(initproc);
     }
   }
-  acquire(&tickslock);
-  curproc->totalTicks -= (curproc->t0 + curproc->timeslice + curproc->givenComp - ticks);
-  if(ticks <= curproc->t0 + curproc->timeslice){
-    curproc->totalComp -= curproc->givenComp;
-  }
-  else{
-    curproc->totalComp -= (curproc->t0 + curproc->timeslice + curproc->givenComp - ticks);
-  }
-	
-  release(&tickslock);
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
-	/*******************************************************************/
-	//release(&ptable.lock);
-	/*******************************************************************/
   curproc->givenComp = 0;
+  curproc->runningTicks = 0;
   pop();
-  sched();
+	if (head != 0) {
+		head->switches++;
+    head->runningTicks = 0;
+	}
+	sched();
   panic("zombie exit");
 }
 
@@ -448,14 +440,28 @@ scheduler(void)
     acquire(&ptable.lock);
 
 		// whenever scheduler gets invoked, the process now at the head should be scheduled
-		
-		
-    //for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    //  if(p->state != RUNNABLE)
-    //    continue;
-
 		if (head != 0) {
-			p = head;
+      acquire(&tickslock);
+      //change this to use runningTicks
+      if(head->runningTicks >= head->timeslice + head->givenComp){
+        head->givenComp = 0;
+        head->runningTicks = 0;
+        push(pop());
+				if (head != 0) {
+        	head->switches++;
+        	head->runningTicks = 0;
+				}
+      }
+      p = head;
+      p->totalTicks++;
+      p->runningTicks++;
+			//In the compticks
+      if(p->runningTicks >= p->timeslice && p->runningTicks < p->timeslice + p->givenComp){
+        p->totalComp++;
+      }
+      release(&tickslock);
+			
+      
 			// Switch to chosen process.  It is the process's job
 			// to release ptable.lock and then reacquire it
 			// before jumping back to us.
@@ -463,22 +469,10 @@ scheduler(void)
 			switchuvm(p);
 			p->state = RUNNING;
 
-			//acquire ticks lock
-			acquire(&tickslock);
-			p->t0 = ticks;
-			release(&tickslock);
-			//release ticks lock
-			p->switches++;
-      p->totalTicks += p->timeslice + p->givenComp;
-      p->totalComp += p->givenComp;
+			//p->switches++;
+      /*p->totalTicks += p->timeslice + p->givenComp;
+      p->totalComp += p->givenComp;*/
 			swtch(&(c->scheduler), p->context);
-      /*
-      p->totalTicks++;
-      acquire(&tickslock);
-      if(p->t0 + p->timeslice < ticks && p->givenComp > 0){
-        p->totalComp++;
-      }
-      release(&tickslock);*/
 			switchkvm();
 		
 			// Process is done running for now.
@@ -522,9 +516,6 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
-  myproc()->givenComp = 0;
-  // Push pop because timeslice +compticks is up, add to tail of queue 
-  push(pop());
   sched();
   release(&ptable.lock);
 }
@@ -576,17 +567,16 @@ sleep(void *chan, struct spinlock *lk)
   p->chan = chan;
   p->state = SLEEPING;
   // Reset givenComp for the next cycle to avoid accumulation
-  p->totalTicks -= (p->t0 + p->timeslice + p->givenComp - ticks);
-  if(ticks <= p->t0 + p->timeslice){
-    p->totalComp -= p->givenComp;
-  }
-  else{
-    p->totalComp -= (p->t0 + p->timeslice + p->givenComp - ticks);
-  }
-	
+  
   p->givenComp = 0;
-  // 
+  p->runningTicks = 0;
   pop();
+  
+	if (head != 0) {
+		head->switches++;
+    head->runningTicks = 0;
+	}
+  
   sched();
 
   // Tidy up.
@@ -617,9 +607,8 @@ wakeup1(void *chan)
       push(p);
     }
     // Increment the compensation ticks while a process is sleeping
-    else if(p->state == SLEEPING /*&& p->chan == chan*/){
+    else if(p->state == SLEEPING && p->chan == chan){
       p->givenComp++;
-      //p->totalComp++;
       p->sleepTicks++;
     }
   }
@@ -651,7 +640,7 @@ kill(int pid)
       //TODO: Maybe adhere to sleepdeadline, probably not tho
       if(p->state == SLEEPING){
         p->state = RUNNABLE;
-        // TODO: Was PushtoBack
+        p->runningTicks = 0;
         push(p);
       }
       release(&ptable.lock);
@@ -805,7 +794,7 @@ int fork2(int slice) {
   np->sleepTicks = 0;
   np->switches = 0;
 	np->sleepDeadline = 0;
-  np->t0 = 0;
+  np->runningTicks = 0;
 	push(np);
 
   release(&ptable.lock);

@@ -6,7 +6,7 @@ int main(int argc, char **argv) {
 	sleep(atoi(argv[1]));
 
 	int i = 0, j = 0;
-	while (i < 80000000) {
+	while (i < 800000000) {
 		j += i * j + 1;
 		i++;
 	}

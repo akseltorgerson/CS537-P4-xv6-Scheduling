@@ -1,15 +1,22 @@
 #include "types.h"
 #include "user.h"
 #include "pstat.h"
+#include "stddef.h"
 
 int main(int argc, char **argv) {
-	struct pstat *pst = (struct pstat*)malloc(sizeof(struct pstat));
+	if (argc != 6) {
+		printf(2, "schedtest: incorrect arg format\n");
+		exit();
+	}
+
+  //struct pstat *pst = 0;
   int sliceA = atoi(argv[1]); 			// 2
-  int sleepA = atoi(argv[2]); 			// 3
+  char* sleepA = argv[2]; 			// 3
   int sliceB = atoi(argv[3]); 			// 5
-  int sleepB = atoi(argv[4]); 			// 5
+  char* sleepB = argv[4]; 			// 5
   int sleepParent = atoi(argv[5]); 	// 100
-  int pid;
+  
+	int pid;
 	int pidA = -1;
 	int pidB = -1;
 	int compticksA = -1;
@@ -17,24 +24,28 @@ int main(int argc, char **argv) {
 
   if ((pid = fork2(sliceA)) == 0) {
     // ChildA
-    char *args[] = {"loop", (char *)sleepA, 0};
+    //(char *)sleepA
+    char *args[] = {"loop", sleepA, NULL};
     exec(args[0], args);
     printf(1, "exec fail\n");
   }
 	pidA = pid;
+	//printf(1, "timesliceA: %d\n", getslice(pidA));
   //printf(1, "%d ", pid);
 
   if ((pid = fork2(sliceB)) == 0) {
     // ChildB
-    char *args[] = {"loop", (char *)sleepB, 0};
+    char *args[] = {"loop", sleepB, NULL};
     exec(args[0], args);
     printf(1, "exec fail\n");
   }
 	pidB = pid;
   //printf(1, "%d \n", pid);
+	//printf(1, "timesliceb: %d\n", getslice(pidB));
 
   // parent sleeps here
   sleep(sleepParent);
+	struct pstat *pst = (struct pstat*)malloc(sizeof(struct pstat));
 
   // calls getpinfo
   getpinfo(pst);
@@ -51,10 +62,12 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	printf(1, "%d %d\n", compticksA, compticksB);
+	printf(1, "%d %d\n", compticksA + 1, compticksB + 1);
 
   wait();
   wait();
+
+	printf(1, "still working \n");
 
   exit();
   return 0;

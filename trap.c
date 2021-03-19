@@ -100,17 +100,13 @@ trap(struct trapframe *tf)
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
     exit();
 
+
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-	acquire(&tickslock);	
   if(myproc() && myproc()->state == RUNNING &&
-     tf->trapno == T_IRQ0+IRQ_TIMER && myproc()->t0 + myproc()->timeslice + myproc()->givenComp <= ticks){
-		// release the lock
-    release(&tickslock);
+     tf->trapno == T_IRQ0+IRQ_TIMER){
     yield();
-  } else { 
-    release(&tickslock);
-  }
+  } 
 
   // Check if the process has been killed since we yielded
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
